@@ -1,7 +1,7 @@
 import { Box, Container, Grid, styled } from "@mui/material"
 import { PostList } from "./PostList"
 import  {PostPage}  from "./PostPage"
-import { Route, Routes,BrowserRouter as Router } from  "react-router-dom"
+import { Route, Routes } from  "react-router-dom"
 
 
 export const BodyList = (props) => {
@@ -26,7 +26,7 @@ return (
     <Styledbox>
       <Styleddiv>
         <Grid container justify="center">
-          <Router>
+          
             <Routes>
               <Route path="/" exact element={<PostList {...props} updateLabel={props.updateLabel} />} />
         <Route path="/:year/:month/:slug" exact element={<PostPage {...props} updateLabel={props.updateLabel} />} />
@@ -34,7 +34,7 @@ return (
         <Route path="/search" exact element={<PostList {...props} updateLabel={props.updateLabel} isSearchPage={true} />} />
         <Route path="*" exact element={<h1>NOT FOUND</h1>} />
             </Routes>
-          </Router>
+         
 
         </Grid>
 
