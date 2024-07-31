@@ -1,0 +1,1552 @@
+class ORM {
+ constructor(sheetName){
+    this.sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    this.ID = this.sheet.getRange(1,1).getValue()
+    this.values = this.sheet.getRange(2,1,this.sheet.getLastRow()-1,this.sheet.getLastColumn()).getValues();
+    this.headers=this.sheet.getRange(1,1,1,this.sheet.getLastColumn()).getValues()[0]
+    this.createAt= this.sheet.getRange('createAt').getColumn()
+    this.updatedAt= this.sheet.getRange('updateAt').getColumn()
+    this.tokensDB=this.sheet.getRange('refreshtoken').getValues().map(v=>v[0])
+    this.ids=this.sheet.getRange(2,1,this.sheet.getLastRow()).getValues().map(r=>r[0])
+    this.reviewsIdPage=this.sheet.getRange(2,2,this.sheet.getLastRow()).getValues().map(r=>r[0])
+  }
+ encrypt(password){
+  let algsha256=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,password)
+  return Utilities.base64Encode(algsha256)
+  }
+  findRowById(id) {
+    let row;
+    const ids =this.ids;
+   ids.map((el,i)=>{
+   if (el == id) row = i + 2 })
+    return row
+  }
+  create(body){
+    const id = this.getNextId() || 1;
+    body[this.ID] = id;
+     const headers = this.headers
+
+    const newRow = [];
+
+    for (const header of headers) {
+      newRow.push(body[header] );
+    }
+    this.sheet.appendRow(newRow);
+    //console.log(...body)
+    return{...body}
+  }
+
+ insertOrder(body){
+    const id = Date.now();
+    body[this.ID] = id;
+  let headers = this.headers
+     // Ajouter les en-têtes pour chaque produit dans les colonnes de la feuille de calcul
+    for (let i = 0; i < body.products.length; i++) {
+        const productHeader = `product${i + 1}`;
+        const quantityHeader = `quantity${i + 1}`;
+
+         if (!headers.includes(productHeader)) {
+        
+  this.sheet.getRange(1, this.sheet.getLastColumn()+1).setValue(productHeader);
+      headers.push(productHeader)
+        }
+
+   if (!headers.includes(quantityHeader)) {
+        headers.push(quantityHeader)
+        this.sheet.getRange(1, this.sheet.getLastColumn()+1).setValue(quantityHeader);
+        }
+    }
+  const newRow = [];
+  for (const header of headers) {
+    if (header.startsWith('product')) {
+       const productIndex = parseInt(header.replace('product', ''));
+      if (body.products[productIndex - 1]) {
+         newRow.push(body.products[productIndex - 1].vid, body.products[productIndex - 1].quantity);
+      }  
+    } else if (header.startsWith('quantity')) {
+       continue;
+    } else {
+       newRow.push(body[header]);
+    }
+  }
+
+  this.sheet.appendRow(newRow);
+
+  return { ...body };
+ }
+ readAll(){
+
+    const values =this.values;
+    const headers = this.headers;
+    const records = [];
+    //Returning data from multi-dimensional array
+    for (let i = 0; i < values.length; i++) {
+      const record = {};
+      for (let j = 0; j < headers.length; j++) {
+        record[headers[j]] = values[i][j];
+      }
+      records.push(record);
+    }
+     return records.reverse();
+ }
+ readById(id){
+   
+    const headers = this.headers;
+  
+      const row = this.findRowById(id)
+      if(row){ 
+      const resultRecord = this.sheet.getRange(row,1,1,this.sheet.getLastColumn()).getValues()
+      const record = {};
+      for (let j = 0; j < headers.length; j++) {
+        record[headers[j]] = resultRecord[0][j] }     
+    return record } else throw new Error(`${this.ID} not Found!`)
+  }
+
+ readByIdReturnArray(id){
+   
+      const row = this.findRowById(id)
+      if(row){ 
+      const record = this.sheet.getRange(row,1,1,this.sheet.getLastColumn()).getValues()[0]
+       
+    return record } else throw new Error(`${this.ID} not Found!`)
+ }
+ readProductById(id){
+  const headers = this.headers;
+  const row = this.findRowById(id);
+
+  if (row) {
+    const resultRecord = this.sheet.getRange(row, 1, 1, this.sheet.getLastColumn()).getValues();
+    const record = {};
+    const variants = [];
+
+    for (let j = 0; j < headers.length; j++) {
+      const header = headers[j];
+      const cellValue = resultRecord[0][j];
+
+      if (header.startsWith('vid_') || header.startsWith('image_') || header.startsWith('key_') || header.startsWith('price_')) {
+        const variantPrefix = header.split('_')[0];
+        const variantIndex = parseInt(header.split('_')[1], 10) - 1;
+
+        if (!variants[variantIndex]) {
+          variants[variantIndex] = {};
+        }
+
+        variants[variantIndex][variantPrefix] = cellValue;
+      } else {
+        record[header] = cellValue;
+      }
+    }
+
+    record.variants = variants.filter(variant => variant.vid);
+
+    return record;
+  } else {
+    throw new Error(`${this.ID} not Found!`);
+  }
+ }
+ updateRecordById(body){
+    const now= new Date()
+    const headers = this.headers;
+   
+    console.log(headers)
+    let row= this.findRowById(body[this.ID])
+     if(!row) throw new Error (`${this.ID} not found!`)
+    for(let key in body ) {
+      let indexHeader= headers.indexOf(key)
+      //if(indexHeader == -1) throw new Error ('Wrong info passed ')
+      if(indexHeader !== -1 && key != body[this.ID]){
+        let col = indexHeader + 1 //psk on aussi supprimer id
+     this.sheet.getRange(row,col).setValue(body[key])}
+    }
+    if (this.sheet.getRange(row,this.createAt).getValue()==""){
+     this.sheet.getRange(row,this.createAt).setValue([now])}
+      
+ } 
+ deleteById(id){
+    let row
+    const ids =this.ids;
+     ids.map((el,i)=>{
+    if (el == id) {
+      this.sheet.deleteRow(i+2)
+      row = i+2} })
+    return row
+ }
+ getNextId(){
+    const ids = this.sheet.getRange(2,1,this.sheet.getLastRow()-1).getValues();
+    let maxId = 0;
+    for (let i = 1; i < ids.length; i++) {
+      const id = ids[i][0];
+      if (id > maxId) {
+        maxId = id;
+      }
+    }
+    return maxId + 1;
+ }
+ createBlobe(base64,name,type){
+  let dcode = Utilities.base64Decode(base64)
+  let blob = Utilities.newBlob(dcode,type,name)
+  let link = DriveApp.createFile(blob).setSharing(DriveApp.Access.ANYONE,DriveApp.Permission.VIEW)
+           .getDownloadUrl().replace('download','view')
+  return link
+ } 
+ validateUsername(username){
+  const MIN_LENGTH = 3;
+  const MAX_LENGTH = 20;
+
+  if (!username) {
+    throw new Error("Username can't be empty.");
+  }
+
+  const usernameRegex = /^[a-zA-Z0-9_-]+$/;
+  if (!usernameRegex.test(username)){
+  throw new Error(`Invalid username!`)}
+
+  const length = username.length;
+  if (length < MIN_LENGTH || length > MAX_LENGTH) {
+    throw new Error(`Username must be more then ${MIN_LENGTH} characters.`);
+  }
+
+  return username;
+ }
+ validateEmail(email){
+  if (!email) throw new Error("Email can't be empty.");
+
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) throw new Error("Invalid email format.");
+
+  return email;
+ }
+ validatePassword(password){
+  const MIN_LENGTH = 6;
+  const MAX_LENGTH = 20;
+
+  if (!password) throw new Error("Password can't be empty.");
+
+  if (/\s/.test(password)) throw new Error("Invalid password,please try again.");
+  
+  const length = password.length;
+  if (length < MIN_LENGTH || length > MAX_LENGTH) throw new Error(`Password must be more then ${MIN_LENGTH} characters.`);
+  
+  return password;
+ }
+ findbycolumnB(id){   
+    let results = []
+    const headers =this.headers;
+    this.values.map(row=>{
+      const record = {}
+     if (row[1]== id) {
+      for (let j = 0; j < headers.length; j++) {
+          record[headers[j]] = row[j];
+        }
+        results.push(record);
+     }
+    } 
+    )
+  return results 
+ }
+ getOneRecord(id){
+    const headers =this.headers;
+      const record = {}
+    this.values.find(row=>{
+     if (row[1]== id) {
+      for (let j = 0; j < headers.length; j++) { record[headers[j]] = row[j] }}
+    } )
+   return record 
+ }
+ insertProductToSheet(product){
+    
+  const headers =  this.headers
+  // Prepare the headers if not exist
+  const requiredHeaders = [
+    'productId', 'title', 'price', 'description', 'images','type','at'
+  ];
+  for (let i = 0; i < product.variant.length; i++) {
+    requiredHeaders.push(`vid_${i + 1}`);
+    requiredHeaders.push(`image_${i + 1}`);
+    requiredHeaders.push(`key_${i + 1}`);
+    requiredHeaders.push(`price_${i + 1}`);
+  }
+ 
+  const newRow = [];
+  requiredHeaders.forEach(header => {
+    if (header.includes('_')) {
+      const [variantProperty,variantIndex] = header.split('_');
+      
+      const variant = product.variant[parseInt(variantIndex) - 1];
+
+      newRow.push(variant[variantProperty]);
+   
+    } else {
+      newRow.push(product[header]);
+    }
+  });
+
+  this.sheet.appendRow(newRow);
+   return {
+    price: product.price,
+    variants: product.variant.map(variant => {
+      return {
+          vid: variant.vid,
+          key: variant.key,
+          price: variant.price
+      };
+    })
+  };
+ }
+ readAllProducts(){
+  const values = this.values;
+  console.log(values)
+  const headers = this.headers;
+  const records = [];
+
+  for (let i = 0; i < values.length; i++) {
+    const record = {};
+    const variants = [];
+
+  for (let j = 0; j < headers.length; j++) {
+      const header = headers[j];
+      const cellValue = values[i][j];
+
+  if (header.startsWith('vid_') || header.startsWith('image_') || header.startsWith('key_') || header.startsWith('price_')) {
+        const parts = header.split('_');
+        const variantPrefix = parts[0];
+        const variantIndex = parseInt(parts[1], 10) - 1;
+
+        if (!variants[variantIndex]) {
+          variants[variantIndex] = {};
+        }
+
+        variants[variantIndex][variantPrefix] = cellValue;
+   } else {
+        record[header] = cellValue;
+   }
+   }
+
+    record.variants = variants.filter(variant => variant.vid);
+
+    records.push(record);
+  }
+
+   return records
+ }
+} 
+  const userDB = new ORM('users')
+  const reviewsDB = new ORM('reviews')
+  const ordersDB = new ORM('orders')
+  const orderUsersDB = new ORM('orderUsers')
+  const tokensDB = new ORM('tokens')
+  const productsDB = new ORM('products')
+  const myProductsDB = new ORM('myProducts')
+
+ /* end orm */
+
+const config={
+  baseUrl : 'http://localhost:5500',
+ urlForResetPassword:'https://windevleopblog.blogspot.com/reset-password/', //TO CHANGE
+ urlVerifyEmailRegister:'https://windevleopblog.blogspot.com/email-verification/', //TO CHANGE
+ sandbox: "https://api-m.sandbox.paypal.com",
+    production: ''  , //"https://api-m.paypal.com",
+    brand_name:'Theshop',
+    cjAccessToken: tokensDB.sheet.getRange('A2').getValue()
+
+}
+ 
+const paypalClientId ='AcF-0C7qEi_4zTEHeWmK8XDzF6_7KIDjlgZnryP-2TTJE7vql2wm3yvxPgk83S6Pzlu1I9yiUXlwkXMu';
+const paypal_baseUrl = config.production ? config.production : config.sandbox
+
+
+ const format  = (date = new Date()) => {
+  // Format date: jour-mois-année
+  const dateStr = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  // Format time: heure:minute:seconde
+  const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  return `${dateStr}   ${timeStr}`;
+};
+
+  /* end code */
+
+class Route {
+  constructor() {
+    this.routes = {};
+  }
+  handleDoGet(req) {
+    const path = req.parameter?.path || '';
+    const method = req.parameter?.method?.toUpperCase() || 'GET';
+
+    // path entre deux barres obliques
+    if (/^\/\w+(?:-\w+)?\//.test(path)) {
+      return this.handleParamsPath(req, method);
+    }
+
+    // Gérer les requêtes avec les propriétés q, sort et filter s'ils existent
+    //const handler = this.routes[path];
+    if (method === "GET" && this.routes[path]) {
+      const queries = req.parameter || {};
+      // const { q, sort, category } = queries;
+
+      return this.routes[path]["GET"](req, queries /* { q, sort, category } */);
+    }
+
+    return this.defaultResponse();
+  }
+
+
+  get(path, handler) {
+    if (!this.routes[path]) { this.routes[path] = {}; }
+
+    this.routes[path]["GET"] = handler;
+  }
+
+  post(path, handler) {
+    if (!this.routes[path]) { this.routes[path] = {}; }
+
+    this.routes[path]["POST"] = handler;
+  }
+  put(path, handler) {
+    if (!this.routes[path]) { this.routes[path] = {}; }
+
+    this.routes[path]["PUT"] = handler;
+  }
+  delete(path, handler) {
+    if (!this.routes[path]) { this.routes[path] = {}; }
+
+    this.routes[path]["DELETE"] = handler;
+  }
+
+  handleDoPost(req) {
+    const path = req.parameter.path?.toLowerCase() || '';
+    const method = req.parameter.method?.toUpperCase() || 'POST';
+    // chemins avec /mot/   skip/\w+skip/
+    if (/\/\w+(-\w+)?\//.test(path)) {
+      return this.handleParamsPath(req, method);
+    }// /^\w+(-\w+)?\/$/
+    // pour les chemins normaux
+    if (this.routes[path] && this.routes[path][method]) {
+      return this.routes[path][method](req);
+    } else {
+      return this.defaultResponse();
+    }
+  }
+
+  handleParamsPath(req, method) {
+    const path = req.parameter?.path || '';
+
+    const pathComponents = path.split('/').filter(Boolean);
+
+    const pathOne = pathComponents.length > 0 ? pathComponents[0].toLowerCase() : null;
+    const otherPaths = pathComponents.slice(1);
+    //console.log("from class otherpaths",otherPaths);//[45 ,55, hkj]
+
+    if (this.routes[pathOne]) {
+      switch (method) {
+        case 'GET':
+          //console.log("from class...otherpaths",...otherPaths);//45 55 hkj
+
+          return this.routes[pathOne]['GET'](req, ...otherPaths);
+          break;
+
+        case 'POST':
+          return this.routes[pathOne]['POST'](req, ...otherPaths);
+          break;
+
+        case 'PUT':
+          return this.routes[pathOne]['PUT'](req, ...otherPaths);
+          break;
+
+        case 'DELETE':
+          return this.routes[pathOne]['DELETE'](req, ...otherPaths);
+          break;
+
+        default:
+          return this.defaultResponse();
+          break;
+      }
+    }
+
+  }
+
+  defaultResponse() {
+    return res ('404 Not Found');
+
+  }
+}
+
+const route = new Route();
+route.get('/getproducts', getAllProducts)
+route.get('getproduct', getProduct)
+route.get("/paypalClientId", getpaypalClientId ) // /paypalClientId  
+
+route.get('reviews', (req,productPageId) => {
+
+ const result = reviewsDB.findbycolumnB(productPageId);
+ if(!result.length)throw new Error('no reviews')
+ return res({ status: true, result})
+})
+
+route.post('reviews', (req,productId) => {
+  const body =  JSON.parse(req.postData.contents) // const body= req.body
+  const {username,review,rating} = body
+  userDB.validateUsername(username)
+  const type = body?.type
+  const name = body?.name
+  const base64 = body?.base64
+  if (type , name , base64 && typeof review == "string" &&  rating.length==1){
+  const img = reviewsDB.createBlobe(base64,name,type)
+  reviewsDB.create({ img ,base64,type,productId,username,review,rating, createdAt: new Date()})
+  return res({ status: true, review: 'review has been created' })}
+  else if (typeof review == "string" &&  rating.length==1){
+  reviewsDB.create({productId,username,review,rating, createdAt: new Date()})
+  return res({ status: true, review: 'review has been created' })}else{
+  throw new Error('invalid review')
+  }  
+
+});
+
+function postReq() {
+  const e = {
+    "parameter": {
+      "path": "/reviews/5",
+      // "path": "/LOGIN",
+      //   "q":"phone",
+      //"method": "post",
+     // "method": "POST"
+    },
+    "body": {
+      //"token":'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDY5NzA3NTAsImlhdCI6MTcwNjk3MDc1MCwiZW1haWwiOiJraGFkaWRqYUBob3RtYWlsLmMiLCJ1c2VySWQiOjIsImlzQWRtaW4iOmZhbHNlfQ.VfS9-qz7eWpBSLcldn-QoNTVZC3ZuN70G3I3m9oiPq4',
+      //  email:"reelancingalgerie@gmail.com",
+     // password1: "123456",
+     // password2: "123456",
+     review: 'c le 1er commentaire',rating:'4',
+       username:"hamdanlileh",
+       base64,
+       type,
+       name
+      //authorization:'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDcwMzg4OTUsImlhdCI6MTcwNjk1MjQ5NSwiZW1haWwiOiJraGFkaWRqYUBob3RtYWlsLmNvbSIsInVzZXJJZCI6MywiaXNBZG1pbiI6dHJ1ZX0.U6zB0gtWr4Z6qKesdsHC38mrE6UIktjAHiC7NZMleSk'
+    }
+  }
+
+ doPost(e) 
+
+}
+route.delete('order', deleteOrder) //?path=/order/${id}&method=DELETE
+
+function deleteOrder(req,id) {
+ const isdeleteted = orderUsersDB.deleteById(id)
+ if (isdeleteted){return res({status:true})}else{throw new Error ('Order Id not Found!')}
+}
+function get() {
+  const e = {
+    "parameter":
+    {
+       "method":"DELETE",
+      //"path": "/users/45/55/hkj"
+      "path": "/order/1715927954542"
+    }
+  }
+
+  doGet(e)
+
+}
+
+route.post("/users", (req, paths) => {
+  console.log(paths);
+
+  const response = "Handling PosT request for /LOGIN";
+  console.log(response);
+  return res(response);
+});
+
+
+
+route.put("users", (req, paths) => {
+  console.log(paths);
+
+  return res('response');
+});
+route.get("users", (req, paths, pp, ...ff) => {
+  // "path":"/users/45/55/hkj"
+
+  console.log(paths);//pathID    45
+  console.log(pp);//PATH APRES      55
+  console.log(ff);//[] le reste arg   [HKJ]  SI ON DELET ...==> ARG SUIVANT hkj
+
+  return res('response');
+});
+
+
+
+
+
+
+
+
+
+function doGet(req) {
+  try {
+    return route.handleDoGet(req)
+  }
+  catch (err) {
+    //  console.log(err)
+    console.log(err.stack) //DEV MODE
+    return res(err.message)
+  }
+
+}
+
+function doPost(req) {
+  try {
+    return route.handleDoPost(req)
+  }
+  catch (err) {
+    //  console.log(err)//DEV MODE
+    console.log(err.stack) //DEV MODE
+    return res(err.message)
+  }
+}
+
+function res(data) {
+  //if(typeof data == "string")return ContentService.createTextOutput(data)
+  const textOutput = JSON.stringify(data);
+  return ContentService.createTextOutput(textOutput).setMimeType(ContentService.MimeType.JSON);
+}
+ 
+/* end routes */
+
+    route.post("/register",register)
+
+  function register (req){
+      const body =  JSON.parse(req.postData.contents)
+      //const body = req.body
+      userDB.validateEmail(body.email)
+      userDB.validatePassword(body.password1)
+      userDB.validatePassword(body.password2)
+      userDB.validateUsername(body.username)
+      const similarEmail = userDB.values.find(r => r[2] === body.email.trim())
+      const password = (body.password1 === body.password2) ? body.password1 : false
+      // console.log(password); 
+      if (!password) throw new Error('Passwords do not match.!')
+      //console.log(similarEmail);
+      if (similarEmail) throw new Error('Email Already exists')
+
+      if (!similarEmail) {
+
+      const similarUsername = userDB.values.find(r => r[1] === body.username.trim())
+      if (similarUsername) throw new Error('Username Already exists')
+      if (!similarUsername) {
+      const user = {
+      password: userDB.encrypt(body.password1),
+      email: body.email.trim(),
+      username:  body.username.trim(),
+      isAdmin: false,
+      createdAt:  new Date() 
+      }
+      const savedUser = userDB.create(user)
+      if (!savedUser) throw new Error('failure saving user in db')
+
+      const { userId,username, email,isAdmin } = savedUser;
+
+      const accesstoken = generateAccessToken({email,isAdmin,userId})
+      const token = generateRefreshToken ({email,isAdmin,userId})
+      if (!accesstoken) throw new Error('token for registred user not generated')
+      console.log(accesstoken);
+      //SEND EMAIL
+      /*  const url = config.urlVerifyEmailRegister
+      const htmlBody = `
+      <head>
+      <style>
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+      p{
+      font-family: 'Poppins', sans-serif;
+      font-weight:400;
+      font-size: 18px;
+      }
+      </style>
+      </head>
+      <p>Dear user,</p>
+      <p>Please,Click the link below to confirm your registration, </p>
+      <p>Link is only valid for the next 30 minutes.</p>
+      ${url}${token}
+      <p>or copy and paste the URL into your browser:</p>
+      <p> ${url}${token}</p>
+      `
+
+      const to = body.email
+      const subject = 'Confirm Registration'
+      MailApp.sendEmail({to,subject,htmlBody})*/
+
+      return res({ status: true, accessToken:accesstoken,token ,isAdmin,userId,username});
+      //+ please check your email to confirm registration
+      }
+      }
+  }
+  route.get("email-verification", (req, token) => {
+
+    console.log('email-verification token==>' + token);
+    // console.log(password); 
+    if (!token)return
+    const userPayload = verifyToken(token, 'secret1')
+    console.log(userPayload);
+
+    if (!userPayload.userId)return
+
+    const emailVerified = {
+    userId: userPayload.userId,
+    verified: true
+    }
+
+    userDB.updateRecordById(emailVerified)
+
+    return res({status:true,response:'User registred successfully'})
+  })
+  route.post("/login", (req) => {
+    const body = JSON.parse(req.postData.contents)
+    //const body = req.body
+
+    userDB.validateEmail(body.email)
+    userDB.validatePassword(body.password)
+    const user = userDB.values //&& row[5] == true  verify email
+    .find(row => row[2] == body.email.trim() &&  row[3] == userDB.encrypt(body.password))
+    if (user) {
+    body.userId = user[0]
+    body.isAdmin = user[4]
+    const accessToken = generateAccessToken(body)
+    if (!accessToken) console.log("access token not generated")
+
+    const token = generateRefreshToken(body)
+    console.log("accessToken", accessToken)
+    console.log("refreshToken", token)
+
+    const makeTokenDB = {
+    userId: user[0],
+    token,
+    lastActivity: new Date()
+    }
+    userDB.updateRecordById(makeTokenDB)
+    return res({ status: true, accessToken,token,userId:user[0],username:user[1]});
+    } else {
+    throw new Error('Wrong Credentials!')
+    }
+  })
+  route.post("/refresh", (req) => {
+    //update refreshtoken en db par un nv token + generer nv access 
+    const body = JSON.parse(req.postData.contents)
+    // const body = req.body
+    const refreshToken = body.token;
+    const accessToken = body.authorization.split(" ")[1];
+    //console.log(refreshToken,accessToken);
+
+    if (!accessToken) throw new Error('Not Authenticated..!');
+    if (!refreshToken) throw new Error('Not Authenticated..!');
+    const tokenDB = userDB.tokensDB.includes(refreshToken)
+    //console.log(isTokenDB);
+
+    if (!tokenDB) throw new Error('Invalid Refresh Token..!')
+    const userPayload = verifyToken(accessToken, 'secret1')
+    // console.log(userJwt);
+    if (!userPayload.userId) console.log('no payload returned')
+
+    const newToken = generateRefreshToken(userPayload)
+    const newAccessToken = generateAccessToken(userPayload)
+    console.log(newToken);
+    console.log(newAccessToken);
+    const updateTokenDB = {
+    userId: userPayload.userId,
+    lastActivity: new Date(),
+    token: newToken
+    }
+    userDB.updateRecordById(updateTokenDB)
+
+    return res({ status: true, accessToken: newAccessToken, refreshToken: newToken })
+  });
+  route.post("/logout", (req) => {
+    // recevoir accesstoken + effacer tokendb
+    const body= JSON.parse(req.postData.contents)
+
+    const accessToken = body.authorization.split(" ")[1]
+    if (!accessToken) throw new Error('You are Not Authenticated..!')
+    const userPayload = verifyToken(accessToken, 'secret1')
+
+    if (userPayload) {
+    const deletTokenDB = {
+    userId: userPayload.userId,
+    token: ''
+    }
+    userDB.updateRecordById(deletTokenDB)
+    console.log("User logged out successfully")
+    return res({status:true,response:"User logged out successfully"})
+    }
+
+  })
+    // RECEVOIR EMAIL + generer token pour creer link
+  route.post("/forgot-password", (req) => {
+
+    const body = JSON.parse(req.postData.contents)
+    //const body = req.body
+
+    userDB.validateEmail(body.email)
+
+    const user = userDB.values.find(r => r[2] === body.email.trim())
+    //console.log(user);
+
+    if (!user) throw new Error('Email not Found!')
+    const userData = {
+    email: body.email,
+    userId: user[0],
+    isAdmin: user[4]
+    }
+    const tokenForEmail = generateAccessToken(userData)
+    console.log(tokenForEmail);
+    //SEND EMAIL
+    const url = config.urlForResetPassword
+    const htmlBody = `
+    <head>
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+    p,a{
+    font-family: 'Poppins', sans-serif;
+    font-weight:400;
+    font-size: 18px;
+    }
+    button:hover {
+    background-color:#002ead;
+    transition: 0.7s;
+    }
+    </style>
+    </head>
+    <p>Dear ${user[1]},</p>
+    <p>We received a request to change your password,</p>
+    <p>To reset your password,Click the button below.</p>
+    <button style="background-color: black ;border-radius:9px; border: none;padding: 10px 10px;text-align: center;text-decoration: none;display: inline-block" ><a style='color: white;text-decoration:none' href=${url}${tokenForEmail}>reset password</a></button>
+    <p>Or copy and paste this URL into your browser:</p>
+    <p> ${url}${tokenForEmail}</p>
+    <p>This password reset link is only valid for the next 30 minutes.</p>
+    <p >If you did not make this request then please ignore this email.</p>
+    `
+
+    const to = body.email
+    const subject = 'Reset Password'
+    MailApp.sendEmail({ to, subject, htmlBody })
+    return res({status:true})
+  })
+     //pour extraire userID  transmettre token dans URL /resetPassword/+ token et nv pass
+  route.post("reset-password", (req, token) => {
+    //const body = req.body
+    const body = JSON.parse(req.postData.contents)
+    console.log('Reset token ==>' + token);
+
+    userDB.validatePassword(body.password1)
+    userDB.validatePassword(body.password2)
+    const password = (body.password1 === body.password2) ?body.password1 : false
+    // console.log(password); 
+    if (!password) throw new Error('Passwords do not match.!')
+    const userPayload = verifyToken(token, 'secret1')
+    console.log(userPayload);
+
+    if (!userPayload.userId) console.log('error:dataToken not REtURNed')
+
+    const updatePassword = {
+    userId: userPayload.userId,
+    password: userDB.encrypt(body.password1),
+    updatedAt: new Date()
+    }
+    //console.log(user);
+
+    userDB.updateRecordById(updatePassword)
+    return res({status:true})
+  })
+
+    // Development MODE
+    function dev() {
+    const e = {
+    "parameter": {
+    //"path": "/reset-password/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDc3NDI2NzUsImlhdCI6MTcwNzczNTQ3NSwiZW1haWwiOiJmcmVlbGFuY2luZ2FsZ2VyaWVAZ21haWwuY29tIiwidXNlcklkIjo1LCJpc0FkbWluIjpmYWxzZX0.rAN_VRKn2E8rFrLFTXQOxeujBHmCoWvzOC5ke32UXs8",
+    //   "path": "/emailVerification/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDc0MDk0MzEsImlhdCI6MTcwNzQwMjIzMSwiZW1haWwiOiJmcmVlbGFuY2luZ2FsZ2VyaWVAZ21haWwuY29tIiwidXNlcklkIjo1LCJpc0FkbWluIjpmYWxzZX0.eGsfwJUfApxhT5N_QgJ0hX2hc41EXeWjCDPcJnAQdHc",
+    //   "q":"phone",
+    //"method": "DELETE"
+    //"method": "POST"
+    //  "path": "/register",
+    "path": "/orders/1716316914245"
+    },
+    "body": {
+    orderId:'1716374633384',
+    total:'183'
+    //  "authorization":`bearer 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTYwNjg3MDYsImlhdCI6MTcxNjA2NTEwNiwiZW1haWwiOiJraGFkYWFAZ21haWwuY29tIiwidXNlcklkIjozMywiaXNBZG1pbiI6ZmFsc2V9.mzmJljUCEpx7P3298sgtTT-mOHKfhOmvn1LZ1R0iMfk`,
+    //   email:"falgerie@gmail.com",
+    //  password1: "1234555",
+    // password2: "1234555",
+    // password:"1234555",
+    //  firstName:"lhamdoh11",
+    //  lastName:"lhamdoulleh1",
+    // zipcode:5455,phone:25355,country:'usa',createAccount:false,city:'test',state:'test',street:'test',street2:'',total:532,
+    // products:[{title:'title1',quantity: 1},{title:'title2',quantity: 2}]
+    //authorization:'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDcwMzg4OTUsImlhdCI6MTcwNjk1MjQ5NSwiZW1haWwiOiJraGFkaWRqYUBob3RtYWlsLmNvbSIsInVzZXJJZCI6MywiaXNBZG1pbiI6dHJ1ZX0.U6zB0gtWr4Z6qKesdsHC38mrE6UIktjAHiC7NZMleSk'
+    }
+    }
+
+    doPost(e)
+    }
+
+    function getDev() {
+    const e = {
+    "parameter":
+    {
+    //"method":"DELETE",
+    //"path": "/email-verification/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDc1NTc4NTYsImlhdCI6MTcwNzU1MDY1NiwiZW1haWwiOiJmcmVlbGFuY2luZ2FsZ2VyaWVAZ21haWwuY29tIiwidXNlcklkIjo1LCJpc0FkbWluIjpmYWxzZX0.LvnWg2aJU59anwN8Stdp-gA9nksNN0d6dWwS5VEiXWk"
+    'path':'/orders/1716244606564/7TB400485J5798612' 
+    }
+    }
+
+    doGet(e)
+    }
+    /* { orderNumber: '1716316914245',
+  shippingZip: 35635,
+  shippingCountryCode: 'CA',
+  shippingCountry: 'Canada',
+  shippingProvince: 'state',
+  shippingCity: 'london',
+  shippingAddress: 'Street adress test  Arris BATNA',
+  shippingCustomerName: 'Khadidja Addaci',
+  shippingPhone: 2222222,
+  fromCountryCode: 'CN',
+  logisticName: 'CJPacket Ordinary',
+  products: [ { vid: '1642014964435128323', quantity: 1 } ] } */
+
+/* end auth */
+
+function cjCreateOrder(payload) {
+   const url = 'https://developers.cjdropshipping.com/api2.0/v1/shopping/order/createOrder';
+   
+   const options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'headers': {
+      'CJ-Access-Token': config.cjAccessToken
+    },
+    'payload': JSON.stringify(payload)
+  };
+
+  try {
+    
+    const response = UrlFetchApp.fetch(url, options);
+  
+    const jsonResponse = JSON.parse(response);
+ 
+  } catch (e) {
+    console.log('Error: ' + e.toString());
+  }
+}
+
+function fetchProductInfo(productId) {
+  const url = `https://developers.cjdropshipping.com/api2.0/v1/product/query?pid=${productId}`;
+  const options = {
+    'headers': {
+      'CJ-Access-Token': config.cjAccessToken
+    }
+  };
+  const response = UrlFetchApp.fetch(url, options);
+  const productInfo = JSON.parse(response.getContentText());
+ Logger.log(response.getContentText())
+  const {pid,productNameEn,sellPrice,description,productKeyEn,productImage,variants} = productInfo.data
+
+  const variant =[]
+  let v ={}
+  variants.map((element) => {
+   v = {
+    vid:element.vid,
+    image: element.variantImage,
+    key: element.variantKey, 
+    price:element.variantSugSellPrice
+    }
+    variant.push(v)
+  });
+  const product = {
+ productId:pid,title:productNameEn,price:sellPrice,by:productKeyEn,description,at:new Date(),images:productImage,variant
+  }
+  productsDB.insertProductToSheet(product)
+
+ }
+
+function fetchAllProductInfo() {
+
+  productsDB.sheet.getRange(2, 1,  productsDB.sheet.getLastRow() - 1,  productsDB.sheet.getLastColumn()).clearContent();
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('productsIDs');
+ 
+  const productIds = sheet.getRange('A1:A').getValues().flat().filter(String);
+
+  for (let i = 0; i < productIds.length; i++) {
+    fetchProductInfo(productIds[i]);
+    Utilities.sleep(5000); 
+  }
+}
+/* function createDailyTrigger() {
+  ScriptApp.newTrigger('fetchAllProductInfo')
+    .timeBased()
+    .atHour(10)
+    .everyDays(1)
+    .create();
+}
+ */
+
+function getAccessToken() {
+  const url = 'https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken';
+  const email = 'freelancingalgerie@gmail.com';
+  const password = '50ad047ff591469491a210171ea7cd57';
+
+  const payload = {
+    email: email,
+    password: password
+  };
+
+  const options = {
+    'method': 'post',
+    'contentType': 'application/json', // Assurez-vous de définir le type de contenu
+    'payload': JSON.stringify(payload)
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const responseData = JSON.parse(response.getContentText());
+    console.log(responseData.data);
+    updateTokens(responseData.data);
+  } catch (error) {
+    console.error('Error fetching access token:', error);
+  }
+}
+
+function refreshAccessToken() {
+  const url = 'https://developers.cjdropshipping.com/api2.0/v1/authentication/refreshAccessToken';
+  const refreshToken = tokensDB.sheet.getRange('C2').getValue();
+
+  const payload = {
+    'refreshToken': refreshToken
+  };
+
+  const options = {
+    'method': 'post','contentType': 'application/json',
+    'payload': JSON.stringify(payload)
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const responseData = JSON.parse(response.getContentText());
+    console.log(responseData.data, responseData);
+    updateTokens(responseData.data)
+  } catch (error) {
+    console.error('Error refreshing access token:', error);
+  }
+}
+
+function updateTokens(responseData) {
+  const accessToken = responseData.accessToken;
+  const accessTokenExpiryDate = responseData.accessTokenExpiryDate;
+  const refreshToken = responseData.refreshToken;
+  const refreshTokenExpiryDate = responseData.refreshTokenExpiryDate;
+
+  tokensDB.sheet.getRange('A2').setValue(accessToken);
+  tokensDB.sheet.getRange('B2').setValue(accessTokenExpiryDate);
+  tokensDB.sheet.getRange('C2').setValue(refreshToken);
+  tokensDB.sheet.getRange('D2').setValue(refreshTokenExpiryDate);
+  tokensDB.sheet.getRange('E2').setValue(new Date());
+  scheduleTokenRefresh(accessTokenExpiryDate);
+}
+
+function scheduleTokenRefresh(expiryDate) {
+  // Clear existing triggers
+  const triggers = ScriptApp.getProjectTriggers();
+  for (const trigger of triggers) {
+    if (trigger.getHandlerFunction() === 'refreshAccessToken') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  }
+
+  const expirationDate = new Date(expiryDate);
+  const refreshTriggerDate = new Date(expirationDate.getTime() - (24 * 60 * 60 * 1000)); // 1 day before expiry
+  ScriptApp.newTrigger('refreshAccessToken')
+           .timeBased()
+           .at(refreshTriggerDate)
+           .create();
+}
+/* end cj */
+
+const createJwt = ({ privateKey, data = {}, expiresIn }) => {
+
+  const header = {
+    alg: 'HS256',
+    typ: 'JWT',
+  };
+  const now = Date.now();
+  const expires = new Date(now);
+  expires.setHours(expires.getHours() + expiresIn);
+
+  const payload = {
+    exp: Math.round(expires.getTime() / 1000),
+    iat: Math.round(now / 1000),
+  };
+
+  Object.keys(data).forEach(function (key) {
+    payload[key] = data[key];
+  });
+
+  const base64Encode = (text, json = true) => {
+    const data = json ? JSON.stringify(text) : text;
+    return Utilities.base64EncodeWebSafe(data).replace(/=+$/, '');
+  };
+
+  const toSign = `${base64Encode(header)}.${base64Encode(payload)}`;
+  const signatureBytes = Utilities.computeHmacSha256Signature(toSign, privateKey);
+  const signature = base64Encode(signatureBytes, false);
+  return `${toSign}.${signature}`;
+};
+
+const generateAccessToken = (body) => {
+  const privateKey = 'secret1';
+  const accessToken = createJwt({
+    privateKey, data: {
+      email: body.email,
+      userId: body.userId,
+      isAdmin: body.isAdmin,
+    },
+    expiresIn: 1
+  });
+  return accessToken;
+}
+
+/* const generateRefreshToken = (body) => {
+  const privateKey = 'secret2';
+  const refreshToken = createJwt({
+    privateKey, data: {
+      email: body.email,
+      userId: body.userId,
+      isAdmin: body.isAdmin,
+    },
+    expiresIn:24
+  });
+  return refreshToken;
+} */
+
+//sans expiration
+function generateRefreshToken(payload) {
+  const secret = "secret2";
+
+  const header = { "alg": "HS256", "typ": "JWT" };
+  const headerBase64 = Utilities.base64EncodeWebSafe(JSON.stringify(header));
+  const payloadBase64 = Utilities.base64EncodeWebSafe(JSON.stringify(payload));
+  const content = headerBase64 + "." + payloadBase64;
+  const signature = Utilities.computeHmacSha256Signature(content, secret);
+  const signatureBase64 = Utilities.base64EncodeWebSafe(signature);
+  return content + "." + signatureBase64;
+
+}
+
+const verifyToken = (jsonWebToken, privateKey) => {
+  const [header, payload, signature] = jsonWebToken.split('.');
+  const signatureBytes = Utilities.computeHmacSha256Signature(`${header}.${payload}`, privateKey);
+  const validSignature = Utilities.base64EncodeWebSafe(signatureBytes);
+  if (signature === validSignature.replace(/=+$/, '')) {
+
+    const blob = Utilities.newBlob(Utilities.base64Decode(payload)).getDataAsString();
+    const { exp, ...data } = JSON.parse(blob);
+    //console.log('exp' + exp);
+   /*  if (new Date(exp * 1000) < new Date()) {
+      console.log('token has expired!');
+      return res({ status: false, response: 'Token has expired!' })
+    } */
+console.log(data)
+    return data
+
+  } else {
+    console.log('issue in verification access token');
+    throw new Error('Token is Not Valid');
+  }
+}
+
+
+//====> il faut lui attribué ID userid aussi====>
+function verifyTokenAndAuthorisation(authBody) {
+  const authorization = authBody.authorization
+  // console.log(authBody);
+  /*  {authorisation: 'Bearer ACCESSTOKEN'} */
+
+  if (authorization) {
+    const token = authorization.split(" ")[1]
+    //console.log(token); ACCESSTOKEN
+
+    const userPayload = verifyToken(token, 'secret1')
+    if (userPayload) {
+      if (userPayload.userId == authBody.userId || userPayload.isAdmin) {
+        console.log(userPayload);
+        return true
+      } else { throw new Error('Not Authorized..!') }
+
+    } else {
+      throw new Error('Token Is Not Valid..!')
+    }
+  } else {
+    throw new Error('You are Not Authenticated..!')
+  }
+}
+
+function verifyAdmin(authBody) {
+  const authorization = authBody.authorization
+  // console.log(authBody);
+  if (authorization) {
+    const token = authorization.split(" ")[1]
+    //console.log(token); ACCESSTOKEN
+
+    const userPayload = verifyToken(token, 'secret1')
+    if (userPayload) {
+
+      if (userPayload.isAdmin) {
+        console.log(userPayload);
+        return true
+      } else { throw new Error('Not Authorised..!') }
+
+    } else { throw new Error('Token Is not Valid..!') }
+
+  } else { throw new Error('You are not Authenticated..!') }
+} 
+
+/* end jwt  */
+
+// Generate the PayPal access token
+const getPayPalAccessToken_ = () => {
+   const credentials = `AcF-0C7qEi_4zTEHeWmK8XDzF6_7KIDjlgZnryP-2TTJE7vql2wm3yvxPgk83S6Pzlu1I9yiUXlwkXMu:EBy5zuRPM7Br46fjEbHWaKoB0gF5iG56ZHItcADATDjt__kN7AeJt4f4L7tbnaBNOBjw5cNsNx0DC_-G`;
+  const headers = {
+    Authorization: `Basic ${Utilities.base64Encode(credentials)}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'Accept-Language': 'en_US',
+  };
+
+  const options = {
+    method: 'POST',
+    headers,
+    contentType: 'application/x-www-form-urlencoded',
+    payload: { grant_type: 'client_credentials' },
+  };
+
+  const request = UrlFetchApp.fetch(`${paypal_baseUrl}/v1/oauth2/token`, options);
+  const { access_token } = JSON.parse(request);
+   // console.log(access_token)
+  return access_token; 
+   // return 'A21AAIc5fY9lspwimbfrWUsSU8lzDSnkeKuQvfK-UqzhBnZlAwGwm25knHxAL7aEsts5iivxjiqDeaZKlvrDe9UlsiGxzBBKA' 
+};
+
+/* function createOrder(products,total = '105.00') {
+  
+    const url = `${paypal_baseUrl}/v2/checkout/orders`;
+    
+    const request =  UrlFetchApp.fetch(url, {
+        method: "POST",
+        headers: {
+             "Content-Type": "application/json",
+            Authorization: `Bearer ${getPayPalAccessToken_()}`,
+        },
+        payload: JSON.stringify({
+            intent: "CAPTURE",           
+            purchase_units: [{
+              items:[{
+                name:'book',
+                quantity: 1,
+                unit_amount:{
+                  currency_code: "USD",
+                    value: '10.00',
+                }
+              }],
+                amount: {
+                    currency_code: "USD",
+                    value: '10.00',
+                    breakdown:{
+                      item_total:{
+                        currency_code: "USD",
+                        value: '10.00',
+                      }
+                    }
+                },
+            }, ],
+            application_context:
+            {
+              return_url:`${config.baseUrl}/success-order`,
+              cancel_url: config.baseUrl,
+              user_action:'PAY_NOW',
+               brand_name:config.brand_name
+            //shipping_preference: 'NO_SHIPPING',
+            }
+        }),
+    });
+    try {
+    const data = JSON.parse(request)  
+ 
+    return {
+      paypalOrderID:data.id,
+      status: data.status, //{ id:'4TF95329RV619950G', status: 'CREATED',
+      url:data.links.find(link=>link.rel ==='approve').href
+    };
+  } catch (err) {
+    const data = JSON.parse(request)  
+    console.log(err, data)  //.text()
+    throw new Error(  err);
+  }
+  
+} */
+  
+function createOrder(total) {  
+  
+  const url = `${paypal_baseUrl}/v2/checkout/orders`;
+    
+    const request =  UrlFetchApp.fetch(url, {
+        method: "POST",
+        headers: {
+             "Content-Type": "application/json",
+            Authorization: `Bearer ${getPayPalAccessToken_()}`,
+        },
+    payload: JSON.stringify({
+      "purchase_units": [
+        {
+          "amount": {
+            "currency_code": "USD",
+            "value": total
+          } 
+        }
+      ],
+      "intent": "CAPTURE",
+      "payment_source": {
+        "paypal": {
+          "experience_context": {
+            "payment_method_preference": "IMMEDIATE_PAYMENT_REQUIRED",
+            "payment_method_selected": "PAYPAL",
+            "brand_name": config.brand_name,
+            "locale": "en-US",
+            "shipping_preference": 'NO_SHIPPING',
+            "user_action": "PAY_NOW"
+            //"return_url":`${config.baseUrl}/success-order`
+          }
+        }
+      }
+    })
+  })
+
+    try {
+    const data = JSON.parse(request)  
+ console.log(data)
+    return data.id
+  } catch (err) {
+    const data = JSON.parse(request)  
+    console.log(err, data)  //.text()
+    throw new Error(  err, data);
+  }
+
+ }
+
+function getpaypalClientId(req){
+ return res ({status :true,paypalClientId})
+ }           
+
+const captureOrder = (orderID) => {
+
+  const url = `${paypal_baseUrl}/v2/checkout/orders/${orderID}/capture`;
+  const options = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ getPayPalAccessToken_()}`,
+      // Uncomment one of these to force an error for negative testing (in sandbox mode only). Documentation:
+      // https://developer.paypal.com/tools/sandbox/negative-testing/request-headers/
+      // "PayPal-Mock-Response": '{"mock_application_codes": "INSTRUMENT_DECLINED"}'
+      // "PayPal-Mock-Response": '{"mock_application_codes": "TRANSACTION_REFUSED"}'
+      // "PayPal-Mock-Response": '{"mock_application_codes": "INTERNAL_SERVER_ERROR"}'
+    },
+  };
+  const request = UrlFetchApp.fetch(url, options);
+   try {
+    const data = JSON.parse(request)  
+    return data
+  } catch (err) {
+    const data = JSON.parse(request)  
+    console.log(err, data)  //.text()
+    throw new Error(err);
+  }
+ }
+
+/* end paypal */
+     route.post("/placeorder",placeOrder)
+    route.post("/myorders",getMyOrders) // {userId,authorization} in body
+
+    route.get("confirmorder",confirmPayedOrder) //  /confirmorder/ mysheetorderid /paypalid   
+    route.get("getorder",getOrder) // getorder/5   to complete order
+    route.post("/profile",getProfile) // {userId,authorization} in body get billing info in place order
+    route.post("/updatepaypalid",updatePaypalID) // updatepaypalid/orderid get new paypal orderID
+  
+  function getProfile (req){
+    const body =  JSON.parse(req.postData.contents)
+    //const body = req.body
+    verifyTokenAndAuthorisation(body) 
+    const {userId} = body
+    const profile = orderUsersDB.getOneRecord(userId)
+    if(!profile) throw new Error('no profile infos')
+    return res ({status :true,profile })
+  }
+  function getOrder (req,orderId,auth){
+    let order;
+    if(!auth) order = ordersDB.readById(orderId)
+    if(auth) order = orderUsersDB.readById(orderId)
+    return res ({status :true,order })
+  }
+  function getMyOrders (req){
+    const body =  JSON.parse(req.postData.contents)
+    //const body = req.body
+    verifyTokenAndAuthorisation(body) 
+    const {userId} = body
+    const userOrders = orderUsersDB.findbycolumnB(userId)
+    return res ({status :true, ...userOrders })
+  }
+  function confirmPayedOrder (req,orderId,paypalOrderId,auth){   
+    const paypalResponse = captureOrder(paypalOrderId)
+    const updatedOrder = {
+    orderId,
+    isPaid: true,
+    paidAt: format(new Date())
+    }
+
+     if (paypalResponse.status ==="COMPLETED"){
+
+    if(!auth) {
+    ordersDB.updateRecordById(updatedOrder)
+    const order = ordersDB.readByIdReturnArray(orderId)
+
+    const products = [];
+
+    for (let i = 16; i < order.length; i += 2) {
+    const vid = order[i];
+    const quantity = order[i + 1];
+    if (vid && quantity) {
+    products.push({ vid, quantity });
+    }
+    } 
+
+    const payload = {
+      orderNumber: orderId,
+      shippingZip: order[7],
+      shippingCountryCode: order[6],
+      shippingCountry: order[5],
+      shippingProvince: order[9],
+      shippingCity: order[8],
+      shippingAddress: order[10],
+      shippingCustomerName: order[2],
+      shippingPhone: order[4],
+      fromCountryCode: "CN",
+      logisticName: "CJPacket Ordinary",
+      products
+    };
+     cjCreateOrder(payload)
+
+    return res({ status:true,isPaid:order[14],paidAt:order[15],total:order[1], orderId, zipcode: order[7], country: order[5],state: order[9],city: order[8], address: order[10], fullName: order[2],phone: order[4],products })
+    } else{ 
+    orderUsersDB.updateRecordById(updatedOrder)
+    const order = orderUsersDB.readByIdReturnArray(orderId)
+
+    const products = [];
+
+    for (let i = 17; i < order.length; i += 2) {
+      const vid = order[i];
+      const quantity = order[i + 1];
+      if (vid && quantity) {
+      products.push({ vid, quantity });
+    }
+    } 
+
+    const payload = {
+      orderNumber: orderId,
+      shippingZip: order[2],
+      shippingCountryCode: order[14],
+      shippingCountry: order[13],
+      shippingProvince: order[10],
+      shippingCity: order[11],
+      shippingAddress: order[12],
+      shippingCustomerName: order[8],
+      shippingPhone: order[15],
+      fromCountryCode: "CN",
+      logisticName: "CJPacket Ordinary",
+      products
+    };
+    cjCreateOrder(payload)
+    return res({ status:true,total:order[3],isPaid:order[4],paidAt:order[5] ,orderId,zipcode: order[2],country: order[13], state: order[10], city: order[11], address: order[12], fullName: order[8],phone: order[15],products })
+    }
+
+    } 
+  }
+  function updatePaypalID (req){
+    const body =  JSON.parse(req.postData.contents)
+    // const body = req.body
+    const paypalOrderId = createOrder(body.total)
+    if(paypalOrderId){
+    const userOrder = {
+    orderId:body.orderId,
+    paypalOrderId 
+    }
+    orderUsersDB.updateRecordById(userOrder)  
+    return res({status: true, paypalOrderId})
+    }
+  }
+  function placeOrder (req){
+      const body =  JSON.parse(req.postData.contents)
+      //const body = req.body
+      const paypalOrderId = createOrder(body.total)
+      const {token} = body
+      //validation 
+      let savedOrder
+      if (token){
+      const userPayload = verifyToken(token, 'secret1')
+      const userOrder = {
+      products: body.products,
+      userId: userPayload.userId,  
+      address:body.address,
+      country: body.country,
+      state: body.state,
+      city: body.city,
+      zipcode: body.zipcode,
+      phone: body.phone,
+      email: body.email,
+      company: body.company,
+      total: body.total,
+      paypalOrderId,
+      fullName: `${body.firstName} ${body.lastName}`.trim(),     
+      createdAt: format(new Date()),isPaid :false }
+      savedOrder = orderUsersDB.insertOrder(userOrder)  
+      }else{
+      const publicOrder = {
+      paypalOrderId,
+      total:body.total,
+      products:body.products,
+      address:body.address,
+       state: body.state,
+      city: body.city,
+      zipcode:body.zipcode,
+      country: body.country,
+      phone: body.phone,
+      company: body.company,
+      email: body.email.trim(),
+      fullName: `${body.firstName} ${body.lastName}`.trim(),     
+      createdAt: format(new Date()),isPaid :false}
+      savedOrder = ordersDB.insertOrder(publicOrder)
+      }  
+      return res({status: true,...savedOrder,response: 'Order has been created successfully.'})
+  }
+
+/* end orders */
+
+ function getAllProducts(){
+  const products = myProductsDB.readAllProducts()
+  // console.log(products)
+  return res(products)
+}
+function getProduct(req,id) { 
+ return res(myProductsDB.readProductById(id)) 
+}
+
+
+
+ 
